@@ -179,6 +179,7 @@ function startGame() {
 }
 
 function nextRound() {
+  state.exploding = false;
   state.round++;
   state.combo = pickCombo(state.round);
   state.total = Math.max(MIN_TIME, START_TIME - SPEEDUP * (state.round - 1));
@@ -214,13 +215,14 @@ function explode() {
   const example = options[Math.floor(Math.random() * options.length)];
   say(`💥 Boom! You could have used "${example || "?"}".`, "bad");
   if (state.lives <= 0) return gameOver();
+  state.exploding = true; // ignore guesses until the next round starts
   setTimeout(nextRound, 1200);
   state.timer = null;
 }
 
 function submit(word) {
   word = word.trim().toLowerCase();
-  if (!word || state.lives <= 0) return;
+  if (!word || state.lives <= 0 || state.exploding) return;
   let err;
   if (!word.includes(state.combo)) err = `Needs "${state.combo.toUpperCase()}".`;
   else if (word.length < 3) err = "At least 3 letters.";
