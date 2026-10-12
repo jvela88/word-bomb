@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Word Bomb</title>
+<style>
+  :root {
+    --bg: #f6f3ee; --panel: #ffffff; --ink: #1d1b19; --muted: #77716a;
+    --accent: #e4572e; --good: #2f9e6b; --bad: #d63a3a; --track: #e7e1d8;
+    --letter-off: #e7e1d8; --letter-on: #f3b33d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17161a; --panel: #222127; --ink: #f1eee9; --muted: #9a958e;
+      --accent: #ff6b3d; --good: #46c48a; --bad: #ff5c5c; --track: #34323a;
+      --letter-off: #34323a; --letter-on: #f3b33d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .game {
+    width: 100%; max-width: 520px; background: var(--panel); border-radius: 20px;
+    padding: 28px 24px; box-shadow: 0 10px 40px rgba(0,0,0,.08); text-align: center;
+  }
+  h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: -.5px; }
+  .sub { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+  .stats { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin-bottom: 18px; }
+  .stats b { color: var(--ink); font-size: 18px; display: block; }
+  .lives { font-size: 20px; letter-spacing: 2px; }
+  .bomb { font-size: 64px; line-height: 1; transition: transform .1s; }
+  .bomb.tick { transform: scale(1.12); }
+  .combo {
+    font-size: 56px; font-weight: 800; letter-spacing: 6px; margin: 8px 0 14px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--accent);
+  }
+  .fuse { height: 10px; background: var(--track); border-radius: 99px; overflow: hidden; margin-bottom: 20px; }
+  .fuse > div { height: 100%; width: 100%; background: var(--accent); border-radius: 99px; }
+  input {
+    width: 100%; font-size: 24px; padding: 12px 16px; border-radius: 12px; text-align: center;
+    border: 2px solid var(--track); background: var(--bg); color: var(--ink); outline: none;
+    text-transform: lowercase; font-family: inherit;
+  }
+  input:focus { border-color: var(--accent); }
+  input.shake { animation: shake .3s; border-color: var(--bad); }
+  @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+  .msg { min-height: 22px; margin: 12px 0 4px; font-size: 15px; color: var(--muted); }
+  .msg.good { color: var(--good); } .msg.bad { color: var(--bad); }
+  .alphabet { display: grid; grid-template-columns: repeat(13, 1fr); gap: 4px; margin-top: 16px; }
+  .alphabet span {
+    font-size: 12px; font-weight: 700; padding: 4px 0; border-radius: 6px;
+    background: var(--letter-off); color: var(--muted); text-transform: uppercase;
+  }
+  .alphabet span.on { background: var(--letter-on); color: #1d1b19; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  button {
+    font-size: 18px; font-weight: 700; padding: 14px 28px; border: 0; border-radius: 12px;
+    background: var(--accent); color: #fff; cursor: pointer; margin-top: 8px;
+  }
+  button:disabled { opacity: .5; cursor: wait; }
+  .hidden { display: none; }
+  .over-words { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<main class="game">
+  <h1>💣 Word Bomb</h1>
+  <p class="sub">Type a word containing the letters before the fuse runs out.</p>
+
+  <section id="start">
+    <p id="loadMsg" class="msg">Loading dictionary…</p>
+    <button id="startBtn" disabled>Start</button>
+    <p class="hint">Use every letter A–Z across your words to earn an extra life.</p>
+  </section>
+
+  <section id="play" class="hidden">
+    <div class="stats">
+      <div>Score<b id="score">0</b></div>
+      <div class="lives" id="lives"></div>
+      <div>Best<b id="best">0</b></div>
+    </div>
+    <div class="bomb" id="bomb">💣</div>
+    <div class="combo" id="combo">—</div>
+    <div class="fuse"><div id="fuseBar"></div></div>
+    <input id="guess" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="type a word + Enter">
+    <div class="msg" id="msg"></div>
+    <div class="alphabet" id="alphabet"></div>
+  </section>
+
+  <section id="over" class="hidden">
+    <div class="bomb">💥</div>
+    <h2 id="overTitle">Boom!</h2>
+    <p id="overText"></p>
+    <p class="over-words" id="overWords"></p>
+    <button id="againBtn">Play again</button>
+  </section>
+</main>
+
+<script>
+const WORDS_URL = "https://cdn.jsdelivr.net/npm/word-list@3.1.0/words.txt";
+const FALLBACK = "sing ring king thing bring nothing string morning reading singing playing apple paper happy table cable stable ant want plant giant planet orange range strange danger answer under thunder wonder tender winter water later letter better butter matter pattern station nation motion ocean action fiction section question mention rocket pocket ticket jacket market basket blanket ship shop shut push fish wish dish chair chain charm reach teach beach peach cheese church catch watch match fetch sketch kitchen".split(" ");
+
+const START_TIME = 10, MIN_TIME = 4, SPEEDUP = 0.25, MAX_LIVES = 3;
+const $ = id => document.getElementById(id);
+
+let dict = new Set(), combos = { easy: [], medium: [], hard: [] };
+let state;
+
+// ---- dictionary + combo pools ----
+async function loadWords() {
+  let words;
+  try {
+    const res = await fetch(WORDS_URL);
+    if (!res.ok) throw new Error(res.status);
+    words = (await res.text()).split("\n").map(w => w.trim().toLowerCase()).filter(w => /^[a-z]{3,}$/.test(w));
+    $("loadMsg").textContent = `${words.length.toLocaleString()} words loaded. Ready?`;
+  } catch {
+    words = FALLBACK;
+    $("loadMsg").textContent = "Offline, so using a tiny backup dictionary.";
+  }
+  dict = new Set(words);
+
+  // Count how many words contain each 2- and 3-letter combo, then bucket by difficulty.
+  const counts = new Map();
+  for (const w of words) {
+    const seen = new Set();
+    for (let n = 2; n <= 3; n++)
+      for (let i = 0; i + n <= w.length; i++) seen.add(w.slice(i, i + n));
+    for (const s of seen) counts.set(s, (counts.get(s) || 0) + 1);
+  }
+  const scale = words.length / 274000; // thresholds tuned for the full list
+  for (const [s, c] of counts) {
+    if (c >= 3000 * scale) combos.easy.push(s);
+    else if (c >= 800 * scale) combos.medium.push(s);
+    else if (c >= 250 * scale && s.length === 3) combos.hard.push(s);
+  }
+  if (!combos.easy.length) combos.easy = [...counts.keys()].filter(s => s.length === 2);
+  $("startBtn").disabled = false;
+}
+
+function pickCombo(round) {
+  const pool = round < 5 ? combos.easy
+    : round < 12 ? (Math.random() < .6 ? combos.medium : combos.easy)
+    : (Math.random() < .5 ? combos.hard : combos.medium);
+  const list = pool.length ? pool : combos.easy;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+// ---- sound ----
+let audio;
+function beep(freq, dur = .08, type = "square", vol = .05) {
+  try {
+    audio ||= new AudioContext();
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = type; o.frequency.value = freq; g.gain.value = vol;
+    o.connect(g).connect(audio.destination);
+    o.start(); g.gain.exponentialRampToValueAtTime(.0001, audio.currentTime + dur);
+    o.stop(audio.currentTime + dur);
+  } catch {}
+}
+
+// ---- storage (wrapped: may be unavailable) ----
+const getBest = () => { try { return +localStorage.getItem("wordbomb-best") || 0; } catch { return 0; } };
+const setBest = v => { try { localStorage.setItem("wordbomb-best", v); } catch {} };
+
+// ---- game loop ----
+function startGame() {
+  state = { score: 0, lives: MAX_LIVES, round: 0, used: new Set(), letters: new Set(), words: [], timer: null };
+  $("start").classList.add("hidden");
+  $("over").classList.add("hidden");
+  $("play").classList.remove("hidden");
+  $("best").textContent = getBest();
+  renderAlphabet(); renderStats();
+  nextRound();
+}
+
+function nextRound() {
+  state.round++;
+  state.combo = pickCombo(state.round);
+  state.total = Math.max(MIN_TIME, START_TIME - SPEEDUP * (state.round - 1));
+  state.end = performance.now() + state.total * 1000;
+  state.lastTick = Infinity;
+  $("combo").textContent = state.combo.toUpperCase();
+  $("guess").value = ""; $("guess").focus();
+  cancelAnimationFrame(state.timer);
+  tick();
+}
+
+function tick() {
+  const left = (state.end - performance.now()) / 1000;
+  const frac = Math.max(0, left / state.total);
+  $("fuseBar").style.width = frac * 100 + "%";
+  // tick sound speeds up as the fuse burns down
+  const interval = .25 + frac * .75;
+  if (state.lastTick - left >= interval) {
+    state.lastTick = left;
+    beep(frac < .3 ? 880 : 520, .04);
+    $("bomb").classList.add("tick");
+    setTimeout(() => $("bomb").classList.remove("tick"), 90);
+  }
+  if (left <= 0) return explode();
+  state.timer = requestAnimationFrame(tick);
+}
+
+function explode() {
+  beep(90, .5, "sawtooth", .12);
+  state.lives--;
+  renderStats();
+  const options = [...dict].filter(w => w.includes(state.combo) && !state.used.has(w) && w.length <= 7);
+  const example = options[Math.floor(Math.random() * options.length)];
+  say(`💥 Boom! You could have used "${example || "?"}".`, "bad");
+  if (state.lives <= 0) return gameOver();
+  setTimeout(nextRound, 1200);
+  state.timer = null;
+}
+
+function submit(word) {
+  word = word.trim().toLowerCase();
+  if (!word || state.lives <= 0) return;
+  let err;
+  if (!word.includes(state.combo)) err = `Needs "${state.combo.toUpperCase()}".`;
+  else if (word.length < 3) err = "At least 3 letters.";
+  else if (state.used.has(word)) err = "Already used!";
+  else if (!dict.has(word)) err = "Not in the dictionary.";
+  if (err) {
+    say(err, "bad"); beep(160, .12, "square", .06);
+    const g = $("guess"); g.classList.remove("shake"); void g.offsetWidth; g.classList.add("shake"); g.select();
+    return;
+  }
+  cancelAnimationFrame(state.timer);
+  state.used.add(word); state.words.push(word);
+  const pts = word.length + (word.length >= 8 ? 5 : 0);
+  state.score += pts;
+  for (const ch of word) state.letters.add(ch);
+  let bonus = "";
+  if (state.letters.size === 26) {
+    state.letters.clear();
+    if (state.lives < MAX_LIVES) { state.lives++; bonus = " ❤️ Alphabet complete, +1 life!"; }
+    else bonus = " 🔤 Alphabet complete!";
+  }
+  say(`+${pts} for "${word}"${bonus}`, "good");
+  beep(660, .07, "triangle", .08); setTimeout(() => beep(990, .09, "triangle", .08), 70);
+  renderStats(); renderAlphabet();
+  nextRound();
+}
+
+function gameOver() {
+  const best = getBest(), isNew = state.score > best;
+  if (isNew) setBest(state.score);
+  setTimeout(() => {
+    $("play").classList.add("hidden");
+    $("over").classList.remove("hidden");
+    $("overTitle").textContent = isNew ? "🏆 New high score!" : "Boom! Game over";
+    $("overText").textContent = `Score ${state.score}, ${state.words.length} words, best ${Math.max(best, state.score)}`;
+    const longest = [...state.words].sort((a, b) => b.length - a.length)[0];
+    $("overWords").textContent = longest ? `Longest word: ${longest}` : "";
+    $("againBtn").focus();
+  }, 1300);
+}
+
+// ---- rendering ----
+function say(text, cls = "") { const m = $("msg"); m.textContent = text; m.className = "msg " + cls; }
+function renderStats() {
+  $("score").textContent = state.score;
+  $("lives").textContent = "❤️".repeat(Math.max(0, state.lives)) + "🖤".repeat(MAX_LIVES - Math.max(0, state.lives));
+}
+function renderAlphabet() {
+  $("alphabet").innerHTML = [..."abcdefghijklmnopqrstuvwxyz"]
+    .map(c => `<span class="${state.letters.has(c) ? "on" : ""}">${c}</span>`).join("");
+}
+
+$("startBtn").onclick = startGame;
+$("againBtn").onclick = startGame;
+$("guess").addEventListener("keydown", e => { if (e.key === "Enter") submit(e.target.value); });
+$("guess").addEventListener("input", () => $("guess").classList.remove("shake"));
+loadWords();
+</script>
+</body>
+</html>
